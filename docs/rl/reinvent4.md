@@ -41,5 +41,72 @@ mv reinvent.prior priors
 ```bash
 mkdir -p runs/antibiotics
 cd runs/antibiotics
-reinvent -l antibiotics.log ../../configs/antibiotics.toml
+for WEIGHT in 1 2 5 10 100
+do
+reinvent -l antibiotics.log ../../configs/antibiotics/antibiotics_weight_${WEIGHT}.toml
+done
+cd ../..
+```
+
+## Filter to valid molecules
+
+```bash
+for WEIGHT in 1 2 5 10 100
+do
+python -c "import pandas as pd
+data = pd.read_csv('runs/antibiotics_weight_${WEIGHT}/staged_learning_1.csv')
+data = data[data['SMILES_state'] == 1]
+data.rename(columns={'SMILES': 'smiles'}, inplace=True)
+data.to_csv('runs/antibiotics_weight_${WEIGHT}/molecules.csv', index=False)"
+done
+```
+
+## Evaluate generated molecules
+
+Switch to the SyntheMol conda environment for the following commands.
+
+Compute novelty of the generated molecules.
+```bash
+for WEIGHT in 1 2 5 10 100
+do
+chemfunc nearest_neighbor \
+    --data_path runs/antibiotics_weight_${WEIGHT}/molecules.csv \
+    --reference_data_path ../SyntheMol/rl/data/s_aureus/s_aureus_hits.csv \
+    --reference_name train_hits \
+    --metric tversky
+
+chemfunc nearest_neighbor \
+    --data_path runs/antibiotics_weight_${WEIGHT}/molecules.csv \
+    --reference_data_path ../SyntheMol/rl/data/chembl/chembl.csv \
+    --reference_name chembl \
+    --metric tversky
+done
+```
+
+Select hit molecules that satisfy novelty, diversity, and efficacy thresholds (including synthesizability and molecular weight).
+```bash
+for WEIGHT in 1 2 5 10 100
+do
+python ../SyntheMol/scripts/data/select_molecules.py \
+    --data_path runs/antibiotics_weight_${WEIGHT}/molecules.csv \
+    --save_molecules_path runs/antibiotics_weight_${WEIGHT}/hits.csv \
+    --save_analysis_path runs/antibiotics_weight_${WEIGHT}/analysis.csv \
+    --score_columns "Antibiotic (raw)" "Solubility (raw)" "SAScore (raw)" "MolecularWeight (raw)" \
+    --score_comparators ">=0.5" ">=-4" "<=4" "<=600" \
+    --novelty_threshold 0.6 0.6 \
+    --similarity_threshold 0.6 \
+    --select_num 20 \
+    --sort_column "Antibiotic" \
+    --descending
+done
+```
+
+Visualize hits.
+```bash
+for WEIGHT in 1 2 5 10 100
+do
+chemfunc visualize_molecules \
+    --data_path runs/antibiotics_weight_${WEIGHT}/hits.csv \
+    --save_dir runs/antibiotics_weight_${WEIGHT}/hits
+done
 ```
